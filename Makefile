@@ -1,75 +1,44 @@
-.PHONY: build app install clean run help
+.PHONY: build install clean download-binary run help
 
-help: ## Show this help message
-	@echo "VibeProxy - macOS Menu Bar App"
+VERSION ?= 0.1.0
+BINARY_NAME = vibeproxy
+BUILD_DIR = .build
+DATA_DIR = $(HOME)/.local/share/vibeproxy
+
+help: ## Show this help
+	@echo "VibeProxy Linux"
 	@echo ""
-	@echo "Available targets:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-build: ## Build the Swift executable (debug)
-	@echo "🔨 Building Swift executable..."
-	@cd src && swift build
-	@echo "✅ Build complete: src/.build/debug/CLIProxyMenuBar"
+build: ## Build the vibeproxy binary
+	@echo "🔨 Building vibeproxy..."
+	@mkdir -p $(BUILD_DIR)
+	@cd . && go build -ldflags="-s -w -X main.version=$(VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/vibeproxy
+	@echo "✅ Built: $(BUILD_DIR)/$(BINARY_NAME)"
 
-release: ## Build the Swift executable (release)
-	@echo "🔨 Building Swift executable (release)..."
-	@./build.sh
-	@echo "✅ Build complete: src/.build/release/CLIProxyMenuBar"
+install: build ## Install vibeproxy to ~/.local/bin
+	@echo "📲 Installing..."
+	@mkdir -p $(HOME)/.local/bin
+	@cp $(BUILD_DIR)/$(BINARY_NAME) $(HOME)/.local/bin/$(BINARY_NAME)
+	@chmod +x $(HOME)/.local/bin/$(BINARY_NAME)
+	@echo "✅ Installed to $(HOME)/.local/bin/$(BINARY_NAME)"
 
-app: ## Create the .app bundle
-	@echo "📦 Creating .app bundle..."
-	@./create-app-bundle.sh
-	@echo "✅ App bundle created: VibeProxy.app"
+download-binary: ## Download latest CLIProxyAPIPlus binary
+	@echo "📦 Downloading CLIProxyAPIPlus..."
+	@chmod +x scripts/download-binary.sh
+	@./scripts/download-binary.sh $(DATA_DIR)
 
-install: app ## Build and install to /Applications
-	@echo "📲 Installing to /Applications..."
-	@rm -rf "/Applications/VibeProxy.app"
-	@cp -r "VibeProxy.app" /Applications/
-	@echo "✅ Installed to /Applications/VibeProxy.app"
+setup: download-binary install ## Full setup: download binary + install vibeproxy
+	@echo ""
+	@echo "✅ Setup complete! Run: vibeproxy start"
 
-run: app ## Build and run the app
-	@echo "🚀 Launching app..."
-	@open "VibeProxy.app"
+run: build ## Build and run
+	@$(BUILD_DIR)/$(BINARY_NAME) start
 
 clean: ## Clean build artifacts
-	@echo "🧹 Cleaning..."
-	@rm -rf src/.build
-	@rm -rf "VibeProxy.app"
-	@rm -rf src/Sources/Resources/cli-proxy-api
-	@rm -rf src/Sources/Resources/config.yaml
-	@rm -rf src/Sources/Resources/static
-	@echo "✅ Clean complete"
+	@rm -rf $(BUILD_DIR)
+	@echo "✅ Clean"
 
-test: ## Run a quick test build
-	@echo "🧪 Testing build..."
-	@cd src && swift build
-	@echo "✅ Test build successful"
-
-info: ## Show project information
-	@echo "Project: VibeProxy - macOS Menu Bar App"
-	@echo "Language: Swift 5.9+"
-	@echo "Platform: macOS 13.0+"
-	@echo ""
-	@echo "Files:"
-	@find src/Sources -name "*.swift" -exec wc -l {} + | tail -1 | awk '{print "  Swift code: " $$1 " lines"}'
-	@echo "  Documentation: 4 files"
-	@echo ""
-	@echo "Structure:"
-	@tree -L 3 -I ".build" || echo "  (install 'tree' for better output)"
-
-open: ## Open app bundle to inspect contents
-	@if [ -d "VibeProxy.app" ]; then \
-		open "VibeProxy.app"; \
-	else \
-		echo "❌ App bundle not found. Run 'make app' first."; \
-	fi
-
-edit-config: ## Edit the bundled config.yaml
-	@if [ -d "VibeProxy.app" ]; then \
-		open -e "VibeProxy.app/Contents/Resources/config.yaml"; \
-	else \
-		echo "❌ App bundle not found. Run 'make app' first."; \
-	fi
-
-# Shortcuts
-all: app ## Same as 'app'
+deps: ## Download Go dependencies
+	@go mod tidy
+	@echo "✅ Dependencies ready"
