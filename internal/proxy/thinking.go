@@ -57,6 +57,26 @@ func (c CodebuffConfig) IsActive() bool {
 // before forwarding to CLIProxyAPI.
 const maxRequestBodySize = 50 << 20 // 50 MB
 
+// codebuffModels lists the OpenRouter model IDs available through Codebuff.
+// These are injected into /v1/models responses with a "codebuff/" prefix.
+var codebuffModels = []string{
+	"anthropic/claude-opus-4-6",
+	"anthropic/claude-sonnet-4-6",
+	"anthropic/claude-sonnet-4.5",
+	"anthropic/claude-4-sonnet-20250522",
+	"anthropic/claude-opus-4.1",
+	"anthropic/claude-3.5-sonnet-20240620",
+	"anthropic/claude-3.5-haiku-20241022",
+	"openai/gpt-5.1",
+	"openai/gpt-4o-2024-11-20",
+	"openai/gpt-4o-mini-2024-07-18",
+	"openai/o3-mini-2025-01-31",
+	"openai/gpt-4.1-nano",
+	"google/gemini-2.5-pro",
+	"google/gemini-2.5-flash",
+	"x-ai/grok-4-07-09",
+}
+
 type ThinkingProxy struct {
 	ProxyPort      int
 	BackendPort    int
@@ -195,7 +215,15 @@ func (tp *ThinkingProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Process thinking parameter for POST requests with body
+	// 4. Intercept GET /v1/models to inject Codebuff models when active.
+	if r.Method == http.MethodGet && tp.CodebuffConfig.IsActive() {
+		if path == "/v1/models" || path == "/api/v1/models" {
+			tp.handleModelsWithCodebuff(w, r)
+			return
+		}
+	}
+
+	// 5. Process thinking parameter for POST requests with body
 	var bodyBytes []byte
 	var modifiedBody []byte
 	var thinkingEnabled bool
@@ -225,14 +253,14 @@ func (tp *ThinkingProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 5. Route Claude requests through Vercel AI Gateway when configured
+	// 6. Route Claude requests through Vercel AI Gateway when configured
 	if tp.VercelConfig.IsActive() && r.Method == http.MethodPost && isClaudeModelRequest(modifiedBody) {
 		log.Println("[ThinkingProxy] Routing Claude request via Vercel AI Gateway")
 		tp.forwardToVercel(w, r, modifiedBody, thinkingEnabled)
 		return
 	}
 
-	// 6. Default: forward to CLIProxyAPI backend
+	// 7. Default: forward to CLIProxyAPI backend
 	tp.forwardToBackend(w, r, rewrittenPath, modifiedBody, thinkingEnabled)
 }
 
@@ -749,6 +777,121 @@ func (tp *ThinkingProxy) forwardToCodebuff(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(resp.StatusCode)
 
 	tp.streamResponse(w, resp.Body)
+}
+
+// codebuffModelEntries returns Codebuff models as json.RawMessage entries ready to append.
+func codebuffModelEntries() []json.RawMessage {
+	now := time.Now().Unix()
+	entries := make([]json.RawMessage, 0, len(codebuffModels))
+	for _, m := range codebuffModels {
+		entry, _ := json.Marshal(map[string]interface{}{
+			"id":       "codebuff/" + m,
+			"object":   "model",
+			"created":  now,
+			"owned_by": "codebuff",
+		})
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// writeCodebuffOnlyModels writes a /v1/models response containing only Codebuff models.
+// Used as a graceful fallback when the backend is unreachable.
+func writeCodebuffOnlyModels(w http.ResponseWriter) {
+	type modelsResponse struct {
+		Object string            `json:"object"`
+		Data   []json.RawMessage `json:"data"`
+	}
+	resp := modelsResponse{Object: "list", Data: codebuffModelEntries()}
+	data, _ := json.Marshal(resp)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+	log.Printf("[ThinkingProxy] Returned %d Codebuff-only models (backend unavailable)", len(codebuffModels))
+}
+
+// handleModelsWithCodebuff intercepts GET /v1/models, forwards to the backend,
+// and appends Codebuff models (with "codebuff/" prefix) to the response.
+func (tp *ThinkingProxy) handleModelsWithCodebuff(w http.ResponseWriter, r *http.Request) {
+	backendURL := fmt.Sprintf("http://127.0.0.1:%d/v1/models", tp.BackendPort)
+
+	backendReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, backendURL, nil)
+	if err != nil {
+		log.Printf("[ThinkingProxy] Error creating backend models request: %v", err)
+		writeCodebuffOnlyModels(w)
+		return
+	}
+	for name, values := range r.Header {
+		for _, v := range values {
+			backendReq.Header.Add(name, v)
+		}
+	}
+	backendReq.Header.Set("Host", backendReq.URL.Host)
+
+	resp, err := tp.backendTransport.RoundTrip(backendReq)
+	if err != nil {
+		log.Printf("[ThinkingProxy] Backend models request failed, returning Codebuff-only: %v", err)
+		writeCodebuffOnlyModels(w)
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("[ThinkingProxy] Error reading backend models response: %v", err)
+		writeCodebuffOnlyModels(w)
+		return
+	}
+
+	// Parse using json.RawMessage to preserve all original fields in backend model entries.
+	type modelsResponse struct {
+		Object string            `json:"object"`
+		Data   []json.RawMessage `json:"data"`
+	}
+
+	var parsed modelsResponse
+	if err := json.Unmarshal(respBody, &parsed); err != nil || parsed.Object == "" {
+		log.Printf("[ThinkingProxy] Could not parse backend models response, returning as-is")
+		for name, values := range resp.Header {
+			for _, v := range values {
+				w.Header().Add(name, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		w.Write(respBody)
+		return
+	}
+
+	parsed.Data = append(parsed.Data, codebuffModelEntries()...)
+
+	merged, err := json.Marshal(parsed)
+	if err != nil {
+		log.Printf("[ThinkingProxy] Error marshaling merged models response: %v", err)
+		for name, values := range resp.Header {
+			for _, v := range values {
+				w.Header().Add(name, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		w.Write(respBody)
+		return
+	}
+
+	for name, values := range resp.Header {
+		if strings.ToLower(name) == "content-length" {
+			continue
+		}
+		for _, v := range values {
+			w.Header().Add(name, v)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(merged)))
+	w.WriteHeader(resp.StatusCode)
+	w.Write(merged)
+
+	log.Printf("[ThinkingProxy] Injected %d Codebuff models into /v1/models response", len(codebuffModels))
 }
 
 // streamResponse copies data from reader to the ResponseWriter, flushing after each chunk.
