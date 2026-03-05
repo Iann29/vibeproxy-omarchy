@@ -657,7 +657,7 @@ func (tp *ThinkingProxy) createCodebuffAgentRun() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create agent-run request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+tp.CodebuffConfig.Token)
+	req.Header.Set("x-codebuff-api-key", tp.CodebuffConfig.Token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := tp.codebuffClient.Do(req)
@@ -739,12 +739,13 @@ func (tp *ThinkingProxy) forwardToCodebuff(w http.ResponseWriter, r *http.Reques
 	}
 
 	excludedHeaders := map[string]bool{
-		"host":              true,
-		"content-length":    true,
-		"connection":        true,
-		"transfer-encoding": true,
-		"authorization":     true,
-		"x-api-key":         true,
+		"host":                true,
+		"content-length":      true,
+		"connection":          true,
+		"transfer-encoding":   true,
+		"authorization":       true,
+		"x-api-key":           true,
+		"x-codebuff-api-key": true,
 	}
 	for name, values := range r.Header {
 		if excludedHeaders[strings.ToLower(name)] {
@@ -755,7 +756,7 @@ func (tp *ThinkingProxy) forwardToCodebuff(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	proxyReq.Header.Set("Authorization", "Bearer "+tp.CodebuffConfig.Token)
+	proxyReq.Header.Set("x-codebuff-api-key", tp.CodebuffConfig.Token)
 	proxyReq.Header.Set("Content-Type", "application/json")
 	proxyReq.Header.Set("Host", "www.codebuff.com")
 	proxyReq.Header.Set("Connection", "close")

@@ -235,6 +235,45 @@ func (m *AuthManager) GetCodebuffToken() string {
 	return ""
 }
 
+// SaveCodebuffAPIKey saves a Codebuff PAT (Personal Access Token) directly,
+// bypassing the browser-based fingerprint auth flow.
+func (m *AuthManager) SaveCodebuffAPIKey(apiKey string) error {
+	if err := os.MkdirAll(m.authDir, 0700); err != nil {
+		return fmt.Errorf("creating auth directory: %w", err)
+	}
+
+	// Remove any existing codebuff auth files to avoid duplicates.
+	entries, _ := os.ReadDir(m.authDir)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "codebuff-") && strings.HasSuffix(entry.Name(), ".json") {
+			os.Remove(filepath.Join(m.authDir, entry.Name()))
+		}
+	}
+
+	masked := apiKey
+	if len(apiKey) > 12 {
+		masked = apiKey[:8] + "..." + apiKey[len(apiKey)-4:]
+	} else {
+		masked = "****"
+	}
+
+	payload := map[string]string{
+		"type":       "codebuff",
+		"email":      masked,
+		"login":      "API Key",
+		"auth_token": apiKey,
+		"created":    time.Now().UTC().Format(time.RFC3339),
+	}
+
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	filename := fmt.Sprintf("codebuff-%s.json", config.GenerateRandomHex(4))
+	return os.WriteFile(filepath.Join(m.authDir, filename), data, 0600)
+}
+
 func (m *AuthManager) SaveZaiAPIKey(apiKey string) error {
 	if err := os.MkdirAll(m.authDir, 0700); err != nil {
 		return fmt.Errorf("creating auth directory: %w", err)
