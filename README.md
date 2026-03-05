@@ -1,151 +1,281 @@
-# VibeProxy
+<p align="center">
+  <img src="icon.png" width="128" height="128" alt="VibeProxy">
+</p>
+
+<h1 align="center">VibeProxy Linux</h1>
 
 <p align="center">
-  <img src="icon.png" width="128" height="128" alt="VibeProxy Icon">
+  <strong>Use your AI subscriptions with any coding tool. No API keys needed.</strong>
 </p>
 
 <p align="center">
-<a href="https://automaze.io" rel="nofollow"><img alt="Automaze" src="https://img.shields.io/badge/By-automaze.io-4b3baf" style="max-width: 100%;"></a>
-<a href="https://github.com/automazeio/vibeproxy/blob/main/LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-28a745" style="max-width: 100%;"></a>
-<a href="http://x.com/intent/follow?screen_name=aroussi" rel="nofollow"><img alt="Follow on 𝕏" src="https://img.shields.io/badge/Follow-%F0%9D%95%8F/@aroussi-1c9bf0" style="max-width: 100%;"></a>
-<a href="https://github.com/automazeio/vibeproxy"><img alt="Star this repo" src="https://img.shields.io/github/stars/automazeio/vibeproxy.svg?style=social&amp;label=Star%20this%20repo&amp;maxAge=60" style="max-width: 100%;"></a></p>
+  <a href="https://github.com/automazeio/vibeproxy/blob/main/LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-28a745"></a>
+  <img alt="Go 1.22+" src="https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white">
+  <img alt="Linux" src="https://img.shields.io/badge/Platform-Linux-FCC624?logo=linux&logoColor=black">
+  <a href="https://github.com/automazeio/vibeproxy"><img alt="Stars" src="https://img.shields.io/github/stars/automazeio/vibeproxy.svg?style=social&label=Star"></a>
 </p>
-
-**Stop paying twice for AI.** VibeProxy is a beautiful native macOS menu bar app that lets you use your existing Claude Code, ChatGPT, **Gemini**, **Qwen**, **Antigravity**, and **Z.AI GLM** subscriptions with powerful AI coding tools like **[Factory Droids](https://app.factory.ai/r/FM8BJHFQ)** – no separate API keys required.
-
-Built on [CLIProxyAPIPlus](https://github.com/router-for-me/CLIProxyAPIPlus), it handles OAuth authentication, token management, and API routing automatically. One click to authenticate, zero friction to code.
-
 
 <p align="center">
-<br>
-  <a href="https://www.loom.com/share/5cf54acfc55049afba725ab443dd3777"><img src="vibeproxy-factory-video.webp" width="600" height="380" alt="VibeProxy Screenshot" border="0"></a>
+  <a href="#installation">Install</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#cli-reference">CLI Reference</a> •
+  <a href="#configuration">Config</a> •
+  <a href="#waybar-integration">Waybar</a> •
+  <a href="#architecture">Architecture</a>
 </p>
-
-> [!TIP]
-> 📣 **NEW: Vercel AI Gateway Integration!**<br>Route your Claude requests through [Vercel's officially sanctioned AI Gateway](https://vercel.com/docs/ai-gateway) for safer access to your Claude Max subscription. No more worrying about account risks from using OAuth tokens directly!
->
-> **Latest models supported:** Gemini 3 Pro (via Antigravity), GPT-5.1 / GPT-5.1 Codex, Claude Sonnet 4.5 / Opus 4.5 with extended thinking, GitHub Copilot, and Z.AI GLM-4.7! 🚀 
-> 
-> **Setup Guides:**
-> - [Factory CLI Setup →](FACTORY_SETUP.md) - Use Factory Droids with your AI subscriptions
-> - [Amp CLI Setup →](AMPCODE_SETUP.md) - Use Amp CLI with fallback to your subscriptions
 
 ---
+
+> **🐧 Linux port** of [VibeProxy](https://github.com/automazeio/vibeproxy) — a lightweight Go CLI that proxies AI coding tool requests through your existing subscriptions. Originally a macOS menu bar app, this fork is rebuilt from scratch as a native Linux CLI with Waybar integration.
+
+## What it does
+
+VibeProxy sits between your AI coding tools (like [Factory](https://factory.ai), [Amp](https://ampcode.com), [Codebuff](https://codebuff.com)) and your existing AI subscriptions — so you don't need separate API keys.
+
+```
+┌──────────────┐      ┌─────────────────────┐      ┌──────────────────────┐      ┌──────────────┐
+│  Coding Tool │ ──▶  │  ThinkingProxy:8317  │ ──▶  │  CLIProxyAPI+:8318   │ ──▶  │  Provider    │
+│  (Factory,   │      │  • thinking params   │      │  • OAuth tokens      │      │  (Claude,    │
+│   Amp, etc.) │      │  • model routing     │      │  • token refresh     │      │   Gemini,    │
+│              │ ◀──  │  • Codebuff relay    │ ◀──  │  • round-robin       │ ◀──  │   GPT, etc.) │
+└──────────────┘      └─────────────────────┘      └──────────────────────┘      └──────────────┘
+```
 
 ## Features
 
-- 🎯 **Native macOS Experience** - Clean, native SwiftUI interface that feels right at home on macOS
-- 🚀 **One-Click Server Management** - Start/stop the proxy server from your menu bar
-- 🔐 **Easy Authentication** - Authenticate with Codex, Claude Code, Gemini, Qwen, Antigravity (OAuth), and Z.AI GLM (API key) directly from the app
-- 🛡️ **Vercel AI Gateway** - Route Claude requests through [Vercel's AI Gateway](https://vercel.com/docs/ai-gateway) for safer access to your Claude Max subscription without risking your account from direct OAuth token usage
-- 👥 **Multi-Account Support** - Connect multiple accounts per provider with automatic round-robin distribution and failover when rate-limited
-- 🎚️ **Provider Priority** - Enable/disable providers to control which models are available (instant hot reload)
-- 📊 **Real-Time Status** - Live connection status and automatic credential detection
-- 🔄 **Automatic App Updates** - Starting with v1.6, VibeProxy checks for updates daily and installs them seamlessly via Sparkle
-- 🎨 **Beautiful Icons** - Custom icons with dark mode support
-- 💾 **Self-Contained** - Everything bundled inside the .app (server binary, config, static files)
+- 🔐 **OAuth Authentication** — One-command login for Claude, Codex, Copilot, Gemini, Qwen, and Antigravity
+- 🧠 **Extended Thinking** — Automatically injects thinking parameters for Claude models
+- 🛡️ **Vercel AI Gateway** — Route Claude requests through [Vercel's AI Gateway](https://vercel.com/docs/ai-gateway) for safer access
+- 👥 **Multi-Account** — Connect multiple accounts per provider with automatic round-robin and failover
+- 🔌 **Codebuff Integration** — Route requests through Codebuff with the `codebuff/` model prefix
+- 📊 **Waybar Module** — Native Waybar integration showing proxy status and connected providers
+- ⚡ **Zero Config Start** — Works out of the box with sensible defaults
+- 🪶 **Lightweight** — Single Go binary, minimal dependencies
 
+## Supported Providers
+
+| Provider | Auth Method | Command |
+|----------|------------|---------|
+| Claude | OAuth (browser) | `vibeproxy auth claude` |
+| Codex | OAuth (browser) | `vibeproxy auth codex` |
+| GitHub Copilot | OAuth (browser) | `vibeproxy auth copilot` |
+| Gemini | OAuth (browser) | `vibeproxy auth gemini` |
+| Qwen | OAuth (browser) | `vibeproxy auth qwen` |
+| Antigravity | OAuth (browser) | `vibeproxy auth antigravity` |
+| Z.AI GLM | API key | `vibeproxy auth zai <key>` |
+| Codebuff | Browser fingerprint | `vibeproxy auth codebuff` |
 
 ## Installation
 
-**Requirements:** macOS 13+ (Ventura or later)
+**Requirements:** Linux (amd64 or arm64), Go 1.22+, `curl`, and a web browser (for OAuth)
 
-### Download Pre-built Release (Recommended)
+```bash
+# Clone the repo
+git clone https://github.com/vibeproxy/vibeproxy-linux.git
+cd vibeproxy-linux
 
-1. Go to the [**Releases**](https://github.com/automazeio/vibeproxy/releases) page
-2. Download the appropriate version for your Mac:
-   - **Apple Silicon** (M1/M2/M3/M4): `VibeProxy-arm64.zip`
-   - **Intel**: `VibeProxy-x86_64.zip` *(untested - please report issues)*
-3. Extract and drag `VibeProxy.app` to `/Applications`
-4. Launch VibeProxy
-
-**Code Signed & Notarized** ✅ - No Gatekeeper warnings, installs seamlessly on macOS.
-
-### Build from Source
-
-Want to build it yourself? See [**INSTALLATION.md**](INSTALLATION.md) for detailed build instructions.
-
-## Usage
-
-### First Launch
-
-1. Launch VibeProxy - you'll see a menu bar icon
-2. Click the icon and select "Open Settings"
-3. The server will start automatically
-4. Click "Connect" for Claude Code, Codex, Gemini, Qwen, or Antigravity to authenticate, or "Add Account" for Z.AI GLM to enter your API key
-
-### Authentication
-
-When you click "Connect":
-1. Your browser opens with the OAuth page
-2. Complete the authentication in the browser
-3. VibeProxy automatically detects your credentials
-4. Status updates to show you're connected
-
-### Server Management
-
-- **Toggle Server**: Click the status (Running/Stopped) to start/stop
-- **Menu Bar Icon**: Shows active/inactive state
-- **Launch at Login**: Toggle to start VibeProxy automatically
-
-## Requirements
-
-- macOS 13.0 (Ventura) or later
-
-## Development
-
-### Project Structure
-
-```
-VibeProxy/
-├── Sources/
-│   ├── main.swift              # App entry point
-│   ├── AppDelegate.swift       # Menu bar & window management
-│   ├── ServerManager.swift     # Server process control & auth
-│   ├── SettingsView.swift      # Main UI
-│   ├── AuthStatus.swift        # Auth file monitoring
-│   └── Resources/
-│       ├── AppIcon.iconset     # App icon
-│       ├── AppIcon.icns        # App icon
-│       ├── cli-proxy-api-plus  # CLIProxyAPIPlus binary
-│       ├── config.yaml         # CLIProxyAPIPlus config
-│       ├── icon-active.png     # Menu bar icon (active)
-│       ├── icon-inactive.png   # Menu bar icon (inactive)
-│       ├── icon-claude.png     # Claude Code service icon
-│       ├── icon-codex.png      # Codex service icon
-│       ├── icon-gemini.png     # Gemini service icon
-│       ├── icon-qwen.png       # Qwen service icon
-│       └── icon-zai.png        # Z.AI GLM service icon
-├── Package.swift               # Swift Package Manager config
-├── Info.plist                  # macOS app metadata
-├── build.sh                    # Resource bundling script
-├── create-app-bundle.sh        # App bundle creation script
-└── Makefile                    # Build automation
+# Full setup: downloads the backend binary + builds & installs vibeproxy
+make setup
 ```
 
-### Key Components
+This installs `vibeproxy` to `~/.local/bin/` — make sure it's in your `PATH`.
 
-- **AppDelegate**: Manages the menu bar item and settings window lifecycle
-- **ServerManager**: Controls the cli-proxy-api server process and OAuth authentication
-- **SettingsView**: SwiftUI interface with native macOS design
-- **AuthStatus**: Monitors `~/.cli-proxy-api/` for authentication files
-- **File Monitoring**: Real-time updates when auth files are added/removed
+### Manual steps
+
+```bash
+make download-binary   # Download CLIProxyAPIPlus to ~/.local/share/vibeproxy/
+make build             # Build to .build/vibeproxy
+make install           # Copy binary to ~/.local/bin/vibeproxy
+```
+
+## Quick Start
+
+```bash
+# 1. Authenticate with a provider
+vibeproxy auth claude
+
+# 2. Start the proxy
+vibeproxy start
+
+# 3. Point your coding tool to http://127.0.0.1:8317
+```
+
+That's it. Configure your AI coding tool to use `http://127.0.0.1:8317` as the API base URL.
+
+### Stopping
+
+```bash
+# From another terminal
+vibeproxy stop
+```
+
+## CLI Reference
+
+```
+🔌 VibeProxy Linux
+
+USAGE:
+  vibeproxy <command> [arguments]
+
+COMMANDS:
+  start              Start the proxy (foreground)
+  stop               Stop a running proxy
+  status             Show proxy status and auth info
+  auth <provider>    Authenticate with a provider
+  config             Show current configuration
+  waybar             Output Waybar-compatible JSON status
+  version            Show version
+  help               Show help text
+```
+
+### `vibeproxy start`
+
+Starts the proxy in the foreground. Runs ThinkingProxy on port **8317** and the backend on port **8318**. Press `Ctrl+C` to stop gracefully.
+
+### `vibeproxy auth <provider>`
+
+Opens the browser for OAuth login. Supported providers:
+
+```bash
+vibeproxy auth claude              # Claude (OAuth)
+vibeproxy auth codex               # Codex (OAuth)
+vibeproxy auth copilot             # GitHub Copilot (OAuth)
+vibeproxy auth gemini              # Gemini (OAuth)
+vibeproxy auth qwen                # Qwen (OAuth)
+vibeproxy auth qwen user@email     # Qwen with email hint
+vibeproxy auth antigravity         # Antigravity (OAuth)
+vibeproxy auth zai sk-abc123       # Z.AI (API key)
+vibeproxy auth codebuff            # Codebuff (browser fingerprint)
+```
+
+### `vibeproxy status`
+
+Shows whether the proxy is running, port info, and authentication status for all providers.
+
+### `vibeproxy waybar`
+
+Outputs a JSON object for Waybar's custom module. See [Waybar Integration](#waybar-integration).
+
+## Configuration
+
+Config file: `~/.config/vibeproxy/config.yaml`
+
+A default config is created on first run. Here's a full example:
+
+```yaml
+# Proxy port (clients connect here)
+proxy_port: 8317
+
+# Backend port (CLIProxyAPIPlus)
+backend_port: 8318
+
+# Path to the CLIProxyAPIPlus binary
+binary_path: ~/.local/share/vibeproxy/cli-proxy-api-plus
+
+# Auth credentials directory
+auth_dir: ~/.cli-proxy-api
+
+# Vercel AI Gateway (optional, for safer Claude access)
+vercel_gateway_enabled: false
+vercel_api_key: ""
+
+# Enable/disable specific providers
+enabled_providers:
+  claude: true
+  codex: true
+  copilot: true
+  gemini: true
+  qwen: true
+  antigravity: true
+  zai: true
+
+# Debug logging
+debug: false
+```
+
+### File Paths
+
+| Path | Purpose |
+|------|---------|
+| `~/.config/vibeproxy/config.yaml` | User configuration |
+| `~/.cli-proxy-api/*.json` | Auth credentials (0600 permissions) |
+| `~/.local/share/vibeproxy/` | Backend binary, PID files, generated configs |
+
+## Waybar Integration
+
+Add a custom module to your Waybar config to see VibeProxy status at a glance.
+
+**~/.config/waybar/config.jsonc:**
+
+```jsonc
+{
+  "modules-right": ["custom/vibeproxy"],
+  "custom/vibeproxy": {
+    "exec": "vibeproxy waybar",
+    "return-type": "json",
+    "interval": 10,
+    "on-click": "vibeproxy status"
+  }
+}
+```
+
+**~/.config/waybar/style.css:**
+
+```css
+#custom-vibeproxy {
+  padding: 0 8px;
+}
+
+#custom-vibeproxy.stopped {
+  color: #f38ba8;
+}
+
+#custom-vibeproxy.running {
+  color: #a6e3a1;
+}
+```
+
+The module shows a 🔌 icon with the number of active providers, and a tooltip with full status details.
+
+## Architecture
+
+```
+vibeproxy
+├── cmd/vibeproxy/main.go        # CLI entry point (start, stop, status, auth, config, waybar)
+├── internal/
+│   ├── proxy/thinking.go        # HTTP reverse proxy: thinking injection, Codebuff/Vercel routing
+│   ├── server/manager.go        # CLIProxyAPIPlus subprocess lifecycle, auth commands
+│   ├── auth/manager.go          # Credential management (~/.cli-proxy-api/)
+│   ├── config/config.go         # YAML config loading, backend config generation
+│   └── notify/notify.go         # Linux desktop helpers (notify-send, xdg-open, clipboard)
+├── configs/config.yaml          # Reference backend config
+├── scripts/
+│   ├── download-binary.sh       # Downloads latest CLIProxyAPIPlus release
+│   └── create-release.sh        # Release automation
+└── Makefile                     # Build, install, setup targets
+```
+
+### Data Flow
+
+1. **Client** sends request to ThinkingProxy (`:8317`)
+2. **ThinkingProxy** inspects the model name:
+   - `codebuff/*` → routed to Codebuff's API
+   - `*-thinking-N` → thinking params injected, forwarded to backend
+   - Claude + Vercel enabled → routed through Vercel AI Gateway
+   - Everything else → forwarded to CLIProxyAPIPlus
+3. **CLIProxyAPIPlus** (`:8318`) handles OAuth token refresh, provider routing, and round-robin across accounts
+4. **Response** streams back through the proxy to the client
 
 ## Credits
 
-VibeProxy is built on top of [CLIProxyAPIPlus](https://github.com/router-for-me/CLIProxyAPIPlus), an excellent unified proxy server for AI services with support for third-party providers.
-
-Special thanks to the CLIProxyAPIPlus project for providing the core functionality that makes VibeProxy possible.
+Built on top of [CLIProxyAPIPlus](https://github.com/router-for-me/CLIProxyAPIPlus) for OAuth handling, token management, and API routing. Linux port by the community.
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Support
-
-- **Report Issues**: [GitHub Issues](https://github.com/automazeio/vibeproxy/issues)
-- **Website**: [automaze.io](https://automaze.io)
+[MIT License](LICENSE)
 
 ---
 
-© 2025 [Automaze, Ltd.](https://automaze.io) All rights reserved.
+<p align="center">
+  <sub>Originally created by <a href="https://automaze.io">Automaze</a> · Linux port with 🐧 by the community</sub>
+</p>
