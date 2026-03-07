@@ -1,6 +1,6 @@
 # Go Build
 .build/
-vibeproxy
+/vibeproxy
 
 # Logs
 *.log

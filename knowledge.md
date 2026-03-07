@@ -4,8 +4,8 @@
 VibeProxy Linux is a Go CLI tool that proxies AI coding tool requests through users' existing Claude, ChatGPT, Gemini, Qwen, Antigravity, Codebuff, and Z.AI subscriptions. It wraps the CLIProxyAPIPlus binary with a ThinkingProxy layer that adds extended thinking support for Claude models. Targets Linux (amd64/arm64).
 
 ## Key directories
-- `cmd/vibeproxy/main.go` — CLI entry point with all commands (start, stop, status, auth, config, waybar, version)
-- `internal/proxy/thinking.go` — HTTP reverse proxy: thinking parameter injection, Vercel/Codebuff/Amp routing
+- `cmd/vibeproxy/main.go` — CLI entry point with all commands (start, stop, restart, status, auth, config, waybar, version)
+- `internal/proxy/thinking.go` — HTTP reverse proxy: thinking parameter injection, Vercel/Codebuff/Amp routing, `/v1/models` Codebuff injection
 - `internal/server/manager.go` — Manages the CLIProxyAPIPlus subprocess lifecycle, auth commands, log capture
 - `internal/auth/manager.go` — Reads/writes auth credential JSON files in `~/.cli-proxy-api/`
 - `internal/config/config.go` — Config loading/saving, backend config generation with provider overrides
@@ -51,7 +51,7 @@ Claude, Codex, GitHub Copilot, Gemini, Qwen, Antigravity, Z.AI GLM, Codebuff
 - Logging via stdlib `log` package throughout
 - ANSI color output in CLI (defined as constants in main.go)
 - Auth flow uses the CLIProxyAPIPlus binary's `-<provider>-login` flags
-- Z.AI uses API keys (not OAuth); Codebuff uses browser-based fingerprint auth
+- Z.AI uses API keys (not OAuth); Codebuff supports browser-based fingerprint auth OR direct API key (`cb-pat-...`)
 - Version injected via `-ldflags` at build time
 
 ## Gotchas
@@ -60,4 +60,5 @@ Claude, Codex, GitHub Copilot, Gemini, Qwen, Antigravity, Z.AI GLM, Codebuff
 - The CLIProxyAPIPlus binary uses single-dash flags (`-config`, `-claude-login`) but the auth command in server/manager.go uses `--config` for the config flag
 - Backend config is dynamically generated at startup (merges base config + Z.AI keys + provider exclusions)
 - `vibeproxy start` runs in the foreground; use `vibeproxy stop` from another terminal
+- `vibeproxy restart` sends SIGTERM to any running instance, then re-execs via `syscall.Exec`
 - Waybar integration via `vibeproxy waybar` outputs JSON for a custom Waybar module

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -18,11 +19,11 @@ import (
 )
 
 const (
-	hardTokenCap     = 32000
-	minimumHeadroom  = 1024
-	headroomRatio    = 0.1
-	vercelGatewayHost = "ai-gateway.vercel.sh"
-	anthropicVersion  = "2023-06-01"
+	hardTokenCap            = 32000
+	minimumHeadroom         = 1024
+	headroomRatio           = 0.1
+	vercelGatewayHost       = "ai-gateway.vercel.sh"
+	anthropicVersion        = "2023-06-01"
 	betaInterleavedThinking = "interleaved-thinking-2025-05-14"
 )
 
@@ -142,13 +143,18 @@ func (tp *ThinkingProxy) Start() error {
 		WriteTimeout: 0,
 	}
 
+	listener, err := net.Listen("tcp", tp.server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", tp.server.Addr, err)
+	}
+
 	tp.mu.Lock()
 	tp.isRunning = true
 	tp.mu.Unlock()
 	log.Printf("[ThinkingProxy] Listening on port %d", tp.ProxyPort)
 
 	go func() {
-		if err := tp.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := tp.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Printf("[ThinkingProxy] Server error: %v", err)
 		}
 		tp.mu.Lock()
@@ -187,6 +193,16 @@ func (tp *ThinkingProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	log.Printf("[ThinkingProxy] Incoming request: %s %s", r.Method, path)
 
+	// 0. Detect codebuff session from /cb/ path prefix (set by claudevibe for codebuff models).
+	// Strip the prefix so all downstream routing works normally.
+	isCodebuffSession := false
+	if strings.HasPrefix(path, "/cb/") {
+		isCodebuffSession = true
+		path = strings.TrimPrefix(path, "/cb") // /cb/v1/messages → /v1/messages
+		r.URL.Path = path
+		log.Printf("[ThinkingProxy] Codebuff session detected, path: %s", path)
+	}
+
 	// 1. Redirect Amp CLI login directly to ampcode.com to preserve auth state cookies
 	if strings.HasPrefix(path, "/auth/cli-login") || strings.HasPrefix(path, "/api/auth/cli-login") {
 		loginPath := path
@@ -218,7 +234,7 @@ func (tp *ThinkingProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 4. Intercept GET /v1/models to inject Codebuff models when active.
 	if r.Method == http.MethodGet && tp.CodebuffConfig.IsActive() {
 		if path == "/v1/models" || path == "/api/v1/models" {
-			tp.handleModelsWithCodebuff(w, r)
+			tp.handleModelsWithCodebuff(w, r, isCodebuffSession)
 			return
 		}
 	}
@@ -237,7 +253,15 @@ func (tp *ThinkingProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 4a. Check for Codebuff-routed requests (model starts with "codebuff/")
+		// 5a. Auto-rewrite model for claudevibe codebuff sessions.
+		// When the request came via /cb/ path prefix, resolve the clean model name
+		// (e.g. "claude-opus-4-6") back to its full codebuff path
+		// (e.g. "codebuff/anthropic/claude-opus-4-6") so the existing routing picks it up.
+		if tp.CodebuffConfig.IsActive() && isCodebuffSession && len(bodyBytes) > 0 {
+			bodyBytes = rewriteModelForCodebuff(bodyBytes)
+		}
+
+		// 5b. Check for Codebuff-routed requests (model starts with "codebuff/")
 		if tp.CodebuffConfig.IsActive() && len(bodyBytes) > 0 {
 			if isCodebuff, codebuffBody := stripCodebuffModelPrefix(bodyBytes); isCodebuff {
 				log.Println("[ThinkingProxy] Routing request via Codebuff backend")
@@ -516,8 +540,8 @@ func (tp *ThinkingProxy) forwardToVercel(w http.ResponseWriter, r *http.Request,
 		"connection":        true,
 		"transfer-encoding": true,
 		"authorization":     true,
-		"x-api-key":        true,
-		"anthropic-beta":   true,
+		"x-api-key":         true,
+		"anthropic-beta":    true,
 	}
 
 	var existingBetaHeader string
@@ -644,6 +668,70 @@ func stripCodebuffModelPrefix(body []byte) (bool, []byte) {
 	return true, modified
 }
 
+// rewriteModelForCodebuff resolves a clean model name (e.g. "claude-opus-4-6") to its
+// full codebuff-prefixed path (e.g. "codebuff/anthropic/claude-opus-4-6") by matching
+// against the known codebuffModels list. Used for claudevibe sessions where the clean
+// model name is passed to Claude Code but needs codebuff routing in the proxy.
+func rewriteModelForCodebuff(body []byte) []byte {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+	model, ok := payload["model"].(string)
+	if !ok || model == "" || strings.HasPrefix(model, "codebuff/") {
+		return body
+	}
+	model = normalizeCodebuffModelAlias(model)
+	payload["model"] = model
+	for _, cm := range codebuffModels {
+		if cm == model {
+			payload["model"] = "codebuff/" + cm
+			modified, err := json.Marshal(payload)
+			if err != nil {
+				return body
+			}
+			log.Printf("[ThinkingProxy] Codebuff auto-rewrite: %s → %s", model, payload["model"])
+			return modified
+		}
+		idx := strings.Index(cm, "/")
+		if idx >= 0 && cm[idx+1:] == model {
+			payload["model"] = "codebuff/" + cm
+			modified, err := json.Marshal(payload)
+			if err != nil {
+				return body
+			}
+			log.Printf("[ThinkingProxy] Codebuff auto-rewrite: %s → %s", model, payload["model"])
+			return modified
+		}
+	}
+	if strings.HasPrefix(model, "claude-") {
+		payload["model"] = "codebuff/anthropic/" + model
+		modified, err := json.Marshal(payload)
+		if err != nil {
+			return body
+		}
+		log.Printf("[ThinkingProxy] Codebuff auto-rewrite (default anthropic): %s → %s", model, payload["model"])
+		return modified
+	}
+	log.Printf("[ThinkingProxy] Codebuff auto-rewrite: no match found for model %q, passing through", model)
+	return body
+}
+
+func normalizeCodebuffModelAlias(model string) string {
+	switch model {
+	case "claude-opus-4.6":
+		return "claude-opus-4-6"
+	case "anthropic/claude-opus-4.6":
+		return "anthropic/claude-opus-4-6"
+	case "claude-sonnet-4.6":
+		return "claude-sonnet-4-6"
+	case "anthropic/claude-sonnet-4.6":
+		return "anthropic/claude-sonnet-4-6"
+	default:
+		return model
+	}
+}
+
 // createCodebuffAgentRun creates a new agent run on the Codebuff API and returns the runId.
 func (tp *ThinkingProxy) createCodebuffAgentRun() (string, error) {
 	reqBody, err := json.Marshal(map[string]string{"action": "START", "agentId": "base"})
@@ -739,12 +827,12 @@ func (tp *ThinkingProxy) forwardToCodebuff(w http.ResponseWriter, r *http.Reques
 	}
 
 	excludedHeaders := map[string]bool{
-		"host":                true,
-		"content-length":      true,
-		"connection":          true,
-		"transfer-encoding":   true,
-		"authorization":       true,
-		"x-api-key":           true,
+		"host":               true,
+		"content-length":     true,
+		"connection":         true,
+		"transfer-encoding":  true,
+		"authorization":      true,
+		"x-api-key":          true,
 		"x-codebuff-api-key": true,
 	}
 	for name, values := range r.Header {
@@ -781,12 +869,21 @@ func (tp *ThinkingProxy) forwardToCodebuff(w http.ResponseWriter, r *http.Reques
 }
 
 // codebuffModelEntries returns Codebuff models as json.RawMessage entries ready to append.
-func codebuffModelEntries() []json.RawMessage {
+// During claudevibe sessions, it exposes clean Claude model IDs so Claude Code sees
+// the same ID it sends while the proxy rewrites requests back to Codebuff routes.
+func codebuffModelEntries(isCodebuffSession bool) []json.RawMessage {
 	now := time.Now().Unix()
 	entries := make([]json.RawMessage, 0, len(codebuffModels))
 	for _, m := range codebuffModels {
+		id := "codebuff/" + m
+		if isCodebuffSession {
+			if !strings.HasPrefix(m, "anthropic/claude-") {
+				continue
+			}
+			id = cleanCodebuffModelID(m)
+		}
 		entry, _ := json.Marshal(map[string]interface{}{
-			"id":       "codebuff/" + m,
+			"id":       id,
 			"object":   "model",
 			"created":  now,
 			"owned_by": "codebuff",
@@ -796,31 +893,71 @@ func codebuffModelEntries() []json.RawMessage {
 	return entries
 }
 
+func cleanCodebuffModelID(model string) string {
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		return model[idx+1:]
+	}
+	return model
+}
+
+func appendUniqueModelEntries(existing, additional []json.RawMessage) []json.RawMessage {
+	seen := make(map[string]struct{}, len(existing)+len(additional))
+	for _, entry := range existing {
+		if id := extractModelID(entry); id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+
+	merged := append([]json.RawMessage{}, existing...)
+	for _, entry := range additional {
+		id := extractModelID(entry)
+		if id != "" {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+		}
+		merged = append(merged, entry)
+	}
+
+	return merged
+}
+
+func extractModelID(entry json.RawMessage) string {
+	var model struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(entry, &model); err != nil {
+		return ""
+	}
+	return model.ID
+}
+
 // writeCodebuffOnlyModels writes a /v1/models response containing only Codebuff models.
 // Used as a graceful fallback when the backend is unreachable.
-func writeCodebuffOnlyModels(w http.ResponseWriter) {
+func writeCodebuffOnlyModels(w http.ResponseWriter, isCodebuffSession bool) {
 	type modelsResponse struct {
 		Object string            `json:"object"`
 		Data   []json.RawMessage `json:"data"`
 	}
-	resp := modelsResponse{Object: "list", Data: codebuffModelEntries()}
+	resp := modelsResponse{Object: "list", Data: codebuffModelEntries(isCodebuffSession)}
 	data, _ := json.Marshal(resp)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
-	log.Printf("[ThinkingProxy] Returned %d Codebuff-only models (backend unavailable)", len(codebuffModels))
+	log.Printf("[ThinkingProxy] Returned %d Codebuff-only models (backend unavailable)", len(resp.Data))
 }
 
 // handleModelsWithCodebuff intercepts GET /v1/models, forwards to the backend,
 // and appends Codebuff models (with "codebuff/" prefix) to the response.
-func (tp *ThinkingProxy) handleModelsWithCodebuff(w http.ResponseWriter, r *http.Request) {
+func (tp *ThinkingProxy) handleModelsWithCodebuff(w http.ResponseWriter, r *http.Request, isCodebuffSession bool) {
 	backendURL := fmt.Sprintf("http://127.0.0.1:%d/v1/models", tp.BackendPort)
 
 	backendReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, backendURL, nil)
 	if err != nil {
 		log.Printf("[ThinkingProxy] Error creating backend models request: %v", err)
-		writeCodebuffOnlyModels(w)
+		writeCodebuffOnlyModels(w, isCodebuffSession)
 		return
 	}
 	for name, values := range r.Header {
@@ -833,7 +970,7 @@ func (tp *ThinkingProxy) handleModelsWithCodebuff(w http.ResponseWriter, r *http
 	resp, err := tp.backendTransport.RoundTrip(backendReq)
 	if err != nil {
 		log.Printf("[ThinkingProxy] Backend models request failed, returning Codebuff-only: %v", err)
-		writeCodebuffOnlyModels(w)
+		writeCodebuffOnlyModels(w, isCodebuffSession)
 		return
 	}
 	defer resp.Body.Close()
@@ -841,7 +978,7 @@ func (tp *ThinkingProxy) handleModelsWithCodebuff(w http.ResponseWriter, r *http
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("[ThinkingProxy] Error reading backend models response: %v", err)
-		writeCodebuffOnlyModels(w)
+		writeCodebuffOnlyModels(w, isCodebuffSession)
 		return
 	}
 
@@ -864,7 +1001,7 @@ func (tp *ThinkingProxy) handleModelsWithCodebuff(w http.ResponseWriter, r *http
 		return
 	}
 
-	parsed.Data = append(parsed.Data, codebuffModelEntries()...)
+	parsed.Data = appendUniqueModelEntries(parsed.Data, codebuffModelEntries(isCodebuffSession))
 
 	merged, err := json.Marshal(parsed)
 	if err != nil {
@@ -892,7 +1029,7 @@ func (tp *ThinkingProxy) handleModelsWithCodebuff(w http.ResponseWriter, r *http
 	w.WriteHeader(resp.StatusCode)
 	w.Write(merged)
 
-	log.Printf("[ThinkingProxy] Injected %d Codebuff models into /v1/models response", len(codebuffModels))
+	log.Printf("[ThinkingProxy] Injected %d Codebuff models into /v1/models response", len(parsed.Data))
 }
 
 // streamResponse copies data from reader to the ResponseWriter, flushing after each chunk.

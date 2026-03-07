@@ -19,9 +19,14 @@ build: ## Build the vibeproxy binary
 install: build ## Install vibeproxy to ~/.local/bin
 	@echo "📲 Installing..."
 	@mkdir -p $(HOME)/.local/bin
-	@cp $(BUILD_DIR)/$(BINARY_NAME) $(HOME)/.local/bin/$(BINARY_NAME)
-	@chmod +x $(HOME)/.local/bin/$(BINARY_NAME)
+	@cp $(BUILD_DIR)/$(BINARY_NAME) $(HOME)/.local/bin/.$(BINARY_NAME).tmp
+	@chmod +x $(HOME)/.local/bin/.$(BINARY_NAME).tmp
+	@mv -f $(HOME)/.local/bin/.$(BINARY_NAME).tmp $(HOME)/.local/bin/$(BINARY_NAME)
+	@printf '#!/bin/sh\nexec vibeproxy claudevibe "$$@"\n' > $(HOME)/.local/bin/.claudevibe.tmp
+	@chmod +x $(HOME)/.local/bin/.claudevibe.tmp
+	@mv -f $(HOME)/.local/bin/.claudevibe.tmp $(HOME)/.local/bin/claudevibe
 	@echo "✅ Installed to $(HOME)/.local/bin/$(BINARY_NAME)"
+	@echo "✅ Installed claudevibe alias to $(HOME)/.local/bin/claudevibe"
 
 download-binary: ## Download latest CLIProxyAPIPlus binary
 	@echo "📦 Downloading CLIProxyAPIPlus..."

@@ -213,8 +213,10 @@ Add a custom module to your Waybar config to see VibeProxy status at a glance.
   "custom/vibeproxy": {
     "exec": "vibeproxy waybar",
     "return-type": "json",
-    "interval": 10,
-    "on-click": "vibeproxy status"
+    "interval": 5,
+    "on-click": "vibeproxy menu",
+    "on-click-right": "vibeproxy toggle",
+    "on-click-middle": "vibeproxy restart"
   }
 }
 ```
@@ -233,9 +235,25 @@ Add a custom module to your Waybar config to see VibeProxy status at a glance.
 #custom-vibeproxy.running {
   color: #a6e3a1;
 }
+
+#custom-vibeproxy.degraded {
+  color: #f9e2af;
+}
 ```
 
-The module shows a 🔌 icon with the number of active providers, and a tooltip with full status details.
+The module shows real proxy health:
+
+- `🔌 <n>` when proxy and backend are healthy (`n` = active providers)
+- `🔌 !` when the proxy is up but the backend is degraded
+- `🔌 off` when the proxy is stopped
+
+Recommended clicks:
+
+- Left click: open the action menu (`start`, `stop`, `restart`, `status`, `logs`)
+- Right click: quick toggle in background
+- Middle click: foreground-style restart
+
+The tooltip also shows whether the PID came from the PID file or was recovered from the listening port, which helps diagnose stale processes after upgrades.
 
 ## Architecture
 
